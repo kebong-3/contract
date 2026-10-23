@@ -18,7 +18,9 @@ export async function GET(request: Request) {
       throw new ServiceError("검색어를 2~100자로 입력해 주세요.", 400);
     if (kind !== "bid" && kind !== "award" && kind !== "shopping")
       throw new ServiceError("지원하지 않는 자료 종류입니다.", 400);
-    return Response.json(await getProcurement(query, kind), {
+    const page = Number(params.get("page") || 1),
+      days = Number(params.get("days") || 30);
+    return Response.json(await getProcurement(query, kind, { page, days }), {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {

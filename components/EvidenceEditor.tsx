@@ -37,6 +37,8 @@ export default function EvidenceEditor({
     onSave(
       {
         ...evidence,
+        reviewed: true,
+        included: draft.included !== false,
         unitPrice: amount,
         quantity: count,
         spec: specification,
@@ -77,6 +79,14 @@ export default function EvidenceEditor({
     >
       <div>
         <strong>원문 확인 후 비교 조건 보완</strong>
+        <label style={{ display: "block", marginTop: 12 }}>
+          <input
+            type="checkbox"
+            checked={draft.included !== false}
+            onChange={(e) => setDraft({ ...draft, included: e.target.checked })}
+          />{" "}
+          이번 비교에 포함 (해제하면 사유와 함께 제외)
+        </label>
         <p style={{ fontSize: 13, lineHeight: 1.7, marginBottom: 0 }}>
           원자료를 변경하는 기능이 아닙니다. 이 검토에서 사용할 확인값과 사유를
           기록합니다. 원문에서 확인되지 않는 항목은 비워 두거나 ‘미확인’으로
@@ -154,6 +164,9 @@ export default function EvidenceEditor({
               setDraft({ ...draft, unit: e.target.value as Evidence["unit"] })
             }
           >
+            {!["대", "개", "세트"].includes(draft.unit) && (
+              <option value={draft.unit}>{draft.unit}</option>
+            )}
             <option value="대">대</option>
             <option value="개">개</option>
             <option value="세트">세트</option>

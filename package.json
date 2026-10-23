@@ -11,7 +11,7 @@
     "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
     "start": "next start",
-    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/api.test.ts tests/workspace.test.ts",
+    "test": "node --experimental-strip-types --test tests/domain.test.ts tests/api.test.ts tests/workspace.test.ts tests/review.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

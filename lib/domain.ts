@@ -6,6 +6,7 @@ export type PurchaseRequest = {
   installation: boolean;
   maintenance: boolean;
   method: "purchase" | "rental";
+  unit?: "대" | "개" | "세트";
 };
 
 export type Evidence = {
@@ -24,8 +25,15 @@ export type Evidence = {
   url: string | null;
   isDemo: boolean;
   description: string;
-  unit: "대" | "개" | "세트";
+  unit: string;
   mixed: boolean;
+  included?: boolean;
+  reviewed?: boolean;
+  priceBasis?:
+    "notice" | "award-total" | "catalog-unit" | "confirmed-unit" | "unknown";
+  retrievedAt?: string;
+  noticeNumber?: string;
+  noticeOrder?: string;
 };
 
 export type Classification = {
@@ -39,6 +47,20 @@ export function classifyEvidence(
 ): Classification {
   const excluded: string[] = [];
   const pending: string[] = [];
+  if (e.included === false)
+    excluded.push("담당자가 이번 비교에서 제외했습니다.");
+  if (e.reviewed === false)
+    pending.push("원자료와 가격 조건을 담당자가 아직 확인하지 않았습니다.");
+  if (e.priceBasis === "notice")
+    pending.push("공고 단계의 참고 단가이며 낙찰·계약 단가가 아닙니다.");
+  if (e.priceBasis === "award-total")
+    pending.push("낙찰 총액입니다. 품목별 단가로 비교할 수 없습니다.");
+  if (!e.unit || e.unit === "미확인")
+    pending.push("물품 단위를 확인해야 합니다.");
+  else if (e.unit !== (request.unit || "대"))
+    excluded.push(
+      `단위가 다릅니다 (${e.unit} / 요청 ${request.unit || "대"}).`,
+    );
   if (e.method === "rental")
     pending.push("임대 기간과 월액·총액 기준을 추가 확인해야 합니다.");
   if (e.method !== request.method) excluded.push("구매·임대 방식이 다릅니다.");
@@ -48,10 +70,14 @@ export function classifyEvidence(
     excluded.push("세트 구성과 요청 품목의 환산 기준이 확인되지 않았습니다.");
   if (e.spec !== null && e.spec < request.minSpec)
     excluded.push("요청한 최소 사양에 미달합니다.");
-  if (e.spec === null) pending.push("최소 사양 충족 여부를 확인해야 합니다.");
+  if (request.minSpec > 0 && e.spec === null)
+    pending.push("최소 사양 충족 여부를 확인해야 합니다.");
   if (e.unitPrice === null || !Number.isFinite(e.unitPrice) || e.unitPrice <= 0)
     pending.push("유효한 단가를 확인해야 합니다.");
-  if (e.quantity === null || !Number.isFinite(e.quantity) || e.quantity <= 0)
+  if (
+    e.priceBasis !== "catalog-unit" &&
+    (e.quantity === null || !Number.isFinite(e.quantity) || e.quantity <= 0)
+  )
     pending.push("거래 수량을 확인해야 합니다.");
   if (e.vat !== "included")
     pending.push(

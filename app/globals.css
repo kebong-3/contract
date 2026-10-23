@@ -2047,3 +2047,202 @@ td small {
     font-size: 23px;
   }
 }
+.quote-board {
+  margin-top: 24px;
+  padding: 26px;
+}
+.quote-board .section-title h2,
+.decision-box h3 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.quote-board .section-title h2 span {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.quote-empty {
+  padding: 28px;
+  text-align: center;
+  background: #f8f7fc;
+  border: 1px dashed #ded8ef;
+  border-radius: 12px;
+  color: #706880;
+  font-size: 14px;
+}
+.quote-form {
+  padding: 22px;
+  background: #f8f7fc;
+  border: 1px solid #e5dff2;
+  border-radius: 14px;
+  margin-top: 20px;
+  display: grid;
+  gap: 16px;
+}
+.quote-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.quote-fields input,
+.quote-fields select,
+.quote-form > label input,
+.decision-box textarea,
+.decision-box select,
+.query-controls select {
+  width: 100%;
+  border: 1px solid #ddd8e7;
+  border-radius: 9px;
+  padding: 11px;
+  background: white;
+  color: #342e42;
+  font: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.quote-checks {
+  display: grid;
+  gap: 10px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.quote-checks label {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+}
+.quote-checks input {
+  margin-top: 5px;
+}
+.quote-gaps {
+  background: #fff;
+  border-radius: 10px;
+  padding: 16px;
+  font-size: 13px;
+}
+.quote-gaps p {
+  margin: 7px 0;
+  line-height: 1.6;
+}
+.decision-box {
+  margin-top: 24px;
+  border-top: 1px solid #eee9f4;
+  padding-top: 20px;
+}
+.decision-box textarea {
+  margin-top: 12px;
+}
+.decision-saved {
+  color: #28634f;
+  font-size: 13px;
+  padding: 12px;
+  background: #eef8f2;
+  border-radius: 8px;
+}
+.form-error,
+.query-error {
+  color: #9d3940;
+  background: #fff2f2;
+  padding: 16px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.query-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  padding: 0 24px 16px;
+  font-size: 12px;
+  color: #71687e;
+}
+.query-controls label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.query-controls select {
+  width: auto;
+}
+.query-controls > button {
+  margin-left: auto;
+}
+.query-receipt {
+  margin: 0 24px 16px;
+  padding: 14px;
+  background: #f7f5fb;
+  border-radius: 10px;
+  color: #6c617a;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.query-receipt button {
+  display: block;
+  margin-top: 8px;
+}
+.query-error {
+  margin: 0 24px 16px;
+}
+.sample-warning {
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 12px;
+  background: #fff8e8;
+  color: #806137;
+  border-radius: 9px;
+}
+.line-item {
+  padding: 14px;
+  border: 1px solid #e6dfef;
+  border-radius: 10px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.line-item small {
+  display: block;
+}
+@media (max-width: 900px) {
+  .quote-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .quote-board {
+    padding: 18px;
+  }
+  .quote-board > .section-title {
+    align-items: flex-start;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+}
+@media (max-width: 560px) {
+  .quote-fields {
+    grid-template-columns: 1fr;
+  }
+  .quote-form {
+    padding: 14px;
+  }
+  .quote-board .section-title h2 span {
+    width: 100%;
+  }
+  .query-controls {
+    padding: 0 16px 16px;
+  }
+  .query-controls > button {
+    margin-left: 0;
+  }
+  .query-receipt,
+  .query-error {
+    margin-left: 16px;
+    margin-right: 16px;
+  }
+  .decision-box .button-group {
+    flex-wrap: wrap;
+  }
+  .decision-box select {
+    max-width: 100%;
+  }
+}

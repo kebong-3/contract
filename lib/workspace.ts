@@ -1,4 +1,5 @@
 import type { Evidence, PurchaseRequest } from "./domain.ts";
+import type { Quote, Decision, QueryReceipt } from "./review.ts";
 
 export type Workspace = {
   request: PurchaseRequest;
@@ -7,6 +8,9 @@ export type Workspace = {
   logs: string[];
   report: string;
   mode: "demo" | "live";
+  quotes?: Quote[];
+  decision?: Decision | null;
+  receipts?: QueryReceipt[];
 };
 
 function invalid(): never {
@@ -82,6 +86,9 @@ export function parseWorkspace(value: unknown): Workspace {
     installation: bool(input.installation),
     maintenance: bool(input.maintenance),
     method: choice(input.method, ["purchase", "rental"] as const),
+    ...(input.unit === undefined
+      ? {}
+      : { unit: choice(input.unit, ["대", "개", "세트"] as const) }),
   };
   if (!Array.isArray(root.evidence) || root.evidence.length > 200)
     return invalid();
@@ -128,10 +135,39 @@ export function parseWorkspace(value: unknown): Workspace {
       url: link(row.url),
       isDemo,
       description: string(row.description, 10000),
-      unit: choice(row.unit, ["대", "개", "세트"] as const),
+      unit: string(row.unit, 30, true),
       mixed: bool(row.mixed),
+      ...(row.included === undefined ? {} : { included: bool(row.included) }),
+      ...(row.reviewed === undefined ? {} : { reviewed: bool(row.reviewed) }),
+      ...(row.priceBasis === undefined
+        ? {}
+        : {
+            priceBasis: choice(row.priceBasis, [
+              "notice",
+              "award-total",
+              "catalog-unit",
+              "confirmed-unit",
+              "unknown",
+            ] as const),
+          }),
+      ...(row.retrievedAt === undefined
+        ? {}
+        : { retrievedAt: string(row.retrievedAt, 100) }),
+      ...(row.noticeNumber === undefined
+        ? {}
+        : { noticeNumber: string(row.noticeNumber, 40) }),
+      ...(row.noticeOrder === undefined
+        ? {}
+        : { noticeOrder: string(row.noticeOrder, 10) }),
     };
   });
+  const quotes =
+    root.quotes === undefined ? undefined : parseQuotes(root.quotes);
+  if (
+    root.decision != null &&
+    !quotes?.some((q) => q.id === object(root.decision).quoteId)
+  )
+    return invalid();
   return {
     request,
     evidence,
@@ -139,5 +175,81 @@ export function parseWorkspace(value: unknown): Workspace {
     checks: strings(root.checks, 200, 1000),
     logs: strings(root.logs, 1000, 2000),
     report: string(root.report, 100000),
+    ...(root.quotes === undefined ? {} : { quotes }),
+    ...(root.decision === undefined
+      ? {}
+      : {
+          decision:
+            root.decision === null
+              ? null
+              : {
+                  quoteId: string(object(root.decision).quoteId, 100, true),
+                  reason: string(object(root.decision).reason, 2000, true),
+                },
+        }),
+    ...(root.receipts === undefined
+      ? {}
+      : { receipts: parseReceipts(root.receipts) }),
   };
+}
+
+function parseQuotes(value: unknown): Quote[] {
+  if (!Array.isArray(value) || value.length > 20) return invalid();
+  const ids = new Set<string>();
+  return value.map((raw) => {
+    const row = object(raw);
+    const id = string(row.id, 100, true);
+    if (ids.has(id)) return invalid();
+    ids.add(id);
+    const nullable = (key: string) =>
+      row[key] === null
+        ? null
+        : number(row[key], 0, Number.MAX_SAFE_INTEGER, true);
+    const validUntil = string(row.validUntil, 10);
+    if (
+      validUntil &&
+      (!/^\d{4}-\d{2}-\d{2}$/.test(validUntil) ||
+        Number.isNaN(Date.parse(validUntil)) ||
+        new Date(validUntil).toISOString().slice(0, 10) !== validUntil)
+    )
+      return invalid();
+    return {
+      id,
+      supplier: string(row.supplier, 200),
+      model: string(row.model, 500),
+      quantity: number(row.quantity, 1, 100000, true),
+      unit: choice(row.unit, ["대", "개", "세트"] as const),
+      unitPrice: nullable("unitPrice"),
+      vat: choice(row.vat, ["included", "excluded", "unknown"] as const),
+      vatAmount: nullable("vatAmount"),
+      deliveryCost: nullable("deliveryCost"),
+      installationCost: nullable("installationCost"),
+      maintenanceCost: nullable("maintenanceCost"),
+      maintenanceScope: string(row.maintenanceScope, 1000),
+      validUntil,
+      sourceNote: string(row.sourceNote, 2000),
+      requirementsConfirmed: bool(row.requirementsConfirmed),
+      taxBasisConfirmed: bool(row.taxBasisConfirmed),
+    };
+  });
+}
+function parseReceipts(value: unknown): QueryReceipt[] {
+  if (!Array.isArray(value) || value.length > 100) return invalid();
+  return value.map((raw) => {
+    const r = object(raw);
+    return {
+      id: string(r.id, 100, true),
+      kind: choice(r.kind, ["bid", "award", "shopping"] as const),
+      query: string(r.query, 100, true),
+      queriedAt: string(r.queriedAt, 100),
+      page: number(r.page, 1, 7, true),
+      days: number(r.days, 1, 364, true),
+      totalCount:
+        r.totalCount === null
+          ? null
+          : number(r.totalCount, 0, Number.MAX_SAFE_INTEGER, true),
+      returnedCount: number(r.returnedCount, 0, 100, true),
+      note: string(r.note, 2000),
+    };
+  });
 }

@@ -67,6 +67,11 @@ function normalize(
     "presmptPrce",
     "asignBdgtAmt",
   ).replace(/,/g, "");
+  const catalogPrice = Number(scalar(row, "cntrctPrceAmt").replace(/,/g, ""));
+  const isCatalogUnit =
+    kind === "shopping" &&
+    Number.isSafeInteger(catalogPrice) &&
+    catalogPrice > 0;
   return {
     id:
       kind === "shopping" && scalar(row, "shopngCntrctNo")
@@ -100,26 +105,41 @@ function normalize(
       "cntrctDate",
       "rgstDt",
     ),
-    unitPrice: null,
+    unitPrice: isCatalogUnit ? catalogPrice : null,
     quantity: null,
     spec: null,
     method: "purchase",
-    mixed: true,
+    mixed: kind !== "shopping" || !scalar(row, "prdctIdntNo"),
+    reviewed: false,
+    priceBasis:
+      kind === "shopping"
+        ? "catalog-unit"
+        : kind === "award"
+          ? "award-total"
+          : "unknown",
+    noticeNumber: scalar(row, "bidNtceNo"),
+    noticeOrder: scalar(row, "bidNtceOrd"),
+    retrievedAt: new Date().toISOString(),
     installation: "unknown",
     maintenance: "unknown",
     vat: "unknown",
     isDemo: false,
-    unit: "대",
+    unit: scalar(row, "prdctUnit", "unit") || "미확인",
     url: safeLink(
       scalar(row, "bidNtceDtlUrl", "bidNtceUrl", "prdctDtlUrl"),
       sources[kind].url,
     ),
     source: kind,
     description: [
-      "구매·임대 방식, 단품 구성, 단가·수량·사양과 비용 포함 여부를 확인해야 하는 원자료입니다.",
-      rawAmount && Number.isFinite(Number(rawAmount))
+      "구매·임대 방식, 단품 구성·사양과 비용 포함 여부를 확인해야 하는 원자료입니다.",
+      isCatalogUnit
+        ? "표시 단가는 쇼핑몰의 계약가격금액(cntrctPrceAmt)입니다. 과거 낙찰단가나 현재 구매 확정가격이 아닙니다."
+        : "원자료 금액의 성격을 확인하기 전에는 단가로 사용하지 마세요.",
+      !isCatalogUnit && rawAmount && Number.isFinite(Number(rawAmount))
         ? `원자료 금액 ${Number(rawAmount).toLocaleString("ko-KR")}원 (금액 성격 미확인·단가 아님)`
-        : "원자료 금액 미확인",
+        : isCatalogUnit
+          ? `계약가격금액 ${catalogPrice.toLocaleString("ko-KR")}원 (쇼핑몰 계약단가·담당자 확인 전)`
+          : "원자료 금액 미확인",
       scalar(row, "prdctSpecNm", "prdctSpec", "specNm"),
       scalar(row, "bidNtceOrd") ? `공고차수 ${scalar(row, "bidNtceOrd")}` : "",
     ]
@@ -128,7 +148,20 @@ function normalize(
   };
 }
 
-export async function getProcurement(query: string, kind: ProcurementKind) {
+export async function getProcurement(
+  query: string,
+  kind: ProcurementKind,
+  options: { page?: number; days?: number } = {},
+) {
+  const page = options.page ?? 1,
+    days = options.days ?? 30;
+  if (
+    !Number.isInteger(page) ||
+    page < 1 ||
+    page > 7 ||
+    ![7, 30].includes(days)
+  )
+    throw new ServiceError("조회 페이지·기간을 확인해주세요.", 400);
   const key = process.env.DATA_GO_KR_SERVICE_KEY;
   if (!key)
     throw new ServiceError(
@@ -144,7 +177,7 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
       503,
     );
   const now = new Date(),
-    from = new Date(now.getTime() - 30 * 86400000);
+    from = new Date(now.getTime() - days * 86400000);
   // Catalog endpoints take dates (8 digits), unlike bid/award timestamps (12).
   // Restrict to less than 12 calendar months as required by the catalog guide.
   const catalogFrom = new Date(now.getTime() - 364 * 86400000);
@@ -189,9 +222,38 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
   }
   url.searchParams.set("serviceKey", decodedKey);
   if (!url.searchParams.has("type")) url.searchParams.set("type", "json");
-  if (!url.searchParams.has("pageNo")) url.searchParams.set("pageNo", "1");
+  url.searchParams.set("pageNo", String(page));
   if (!url.searchParams.has("numOfRows"))
     url.searchParams.set("numOfRows", "30");
+  const data = await fetchPublicData(url);
+  const body = data.response?.body ?? data.body;
+  const raw = body.items?.item ?? body.items ?? body.item ?? [];
+  const rows = Array.isArray(raw)
+    ? raw
+    : raw && typeof raw === "object"
+      ? [raw]
+      : [];
+  const total = Number(body.totalCount);
+  return {
+    items: rows
+      .filter((row: unknown) => row && typeof row === "object")
+      .slice(0, 100)
+      .map((row: Record<string, unknown>, index: number) =>
+        normalize(row, kind, (page - 1) * 30 + index),
+      ),
+    source: sources[kind],
+    queriedAt: new Date().toISOString(),
+    page,
+    days: kind === "shopping" ? 364 : days,
+    totalCount:
+      body.totalCount != null && Number.isSafeInteger(total) && total >= 0
+        ? total
+        : null,
+    note: `${kind === "shopping" ? "최근 364일에 등록된 현재 등재 품목" : kind === "award" ? `최근 ${days}일 개찰일 기준` : `최근 ${days}일 공고게시일 기준`} ${page}페이지 조회 결과입니다. 전체 검색을 뜻하지 않습니다. 공고금액·낙찰총액·쇼핑몰 계약단가를 같은 가격으로 취급하지 마세요.`,
+  };
+}
+
+async function fetchPublicData(url: URL) {
   const response = await fetch(url, {
     cache: "no-store",
     signal: AbortSignal.timeout(18000),
@@ -221,21 +283,70 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
     throw new ServiceError(
       "공공데이터 응답 구조를 확인할 수 없습니다. 해당 API의 응답 규격을 확인해 주세요.",
     );
+  return data;
+}
+
+export async function getNoticeProducts(noticeNo: string, noticeOrder: string) {
+  if (!/^[A-Za-z0-9_-]{5,40}$/.test(noticeNo) || !/^\d{1,3}$/.test(noticeOrder))
+    throw new ServiceError("공고번호와 차수를 확인해주세요.", 400);
+  const key = process.env.DATA_GO_KR_SERVICE_KEY;
+  if (!key)
+    throw new ServiceError("공공데이터 인증키가 설정되지 않았습니다.", 503);
+  const url = new URL(
+    "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPurchsObjPrdct",
+  );
+  let decoded = key;
+  try {
+    decoded = decodeURIComponent(key);
+  } catch {}
+  Object.entries({
+    serviceKey: decoded,
+    type: "json",
+    pageNo: "1",
+    numOfRows: "100",
+    inqryDiv: "2",
+    bidNtceNo: noticeNo,
+    bidNtceOrd: noticeOrder,
+  }).forEach(([k, v]) => url.searchParams.set(k, v));
+  const data = await fetchPublicData(url);
+  const body = data.response?.body ?? data.body;
   const raw = body.items?.item ?? body.items ?? body.item ?? [];
   const rows = Array.isArray(raw)
     ? raw
     : raw && typeof raw === "object"
       ? [raw]
       : [];
+  const retrievedAt = new Date().toISOString();
+  const items: Evidence[] = rows
+    .filter(
+      (r: Record<string, unknown>) =>
+        r &&
+        scalar(r, "bidNtceNo") === noticeNo &&
+        scalar(r, "bidNtceOrd") === noticeOrder,
+    )
+    .slice(0, 100)
+    .map((r: Record<string, unknown>, i: number) => {
+      const price = Number(scalar(r, "uprc").replace(/,/g, "")),
+        qty = Number(scalar(r, "qty").replace(/,/g, ""));
+      return {
+        ...normalize(r, "bid", i),
+        id: `bid:${noticeNo}:${noticeOrder}:item:${scalar(r, "bidClsfcNo")}:${scalar(r, "prdctSno") || i}`,
+        title:
+          scalar(r, "dtilPrdctClsfcNoNm", "prdctClsfcNoNm") ||
+          "공고 구매대상 물품",
+        date: scalar(r, "ntceNticeDt"),
+        unitPrice: Number.isSafeInteger(price) && price > 0 ? price : null,
+        quantity: Number.isSafeInteger(qty) && qty > 0 ? qty : null,
+        unit: scalar(r, "unit") || "미확인",
+        mixed: false,
+        priceBasis: "notice",
+        retrievedAt,
+        description: `공고번호 ${noticeNo}-${noticeOrder} / 규격 ${scalar(r, "prdctSpecNm") || "미제공"} / 인도조건 ${scalar(r, "dlvryCndtnNm") || "미제공"} / 납품기한 ${scalar(r, "dlvrTmlmtDt") || "미제공"}. 공고의 구매대상 물품과 계획 단가이며 낙찰·계약 단가가 아닙니다.`,
+      };
+    });
   return {
-    items: rows
-      .filter((row: unknown) => row && typeof row === "object")
-      .slice(0, 100)
-      .map((row: Record<string, unknown>, index: number) =>
-        normalize(row, kind, index),
-      ),
-    source: sources[kind],
-    queriedAt: new Date().toISOString(),
-    note: `${kind === "shopping" ? "최근 364일에 등록된 현재 등재 품목" : kind === "award" ? "최근 30일 개찰일 기준" : "최근 30일 공고게시일 기준"} 최대 30건의 기본 조회 결과입니다. 전체 검색을 뜻하지 않습니다. 금액은 원자료 확인 전 단가 비교에 사용하지 마세요.`,
+    items,
+    queriedAt: retrievedAt,
+    note: "공고번호·차수가 일치하는 구매대상 물품 최대 100건입니다. 규격과 단위를 확인하고 참고자료로만 사용하세요.",
   };
 }

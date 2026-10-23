@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { POST } from "../app/api/analyze/route.ts";
 import { GET as procurement } from "../app/api/procurement/route.ts";
 import { GET as status } from "../app/api/status/route.ts";
-import { getProcurement } from "../lib/public-data.ts";
+import { getNoticeProducts, getProcurement } from "../lib/public-data.ts";
 
 test("API validation, missing keys and protected access return explicit errors", async () => {
   const names = [
@@ -222,7 +222,9 @@ test("catalog mapping preserves product identity, specification, supplier and un
     assert.equal(result.items[0].title, "공기청정기, 규격 A");
     assert.equal(result.items[0].agency, "테스트 공급자");
     assert.ok(result.items[0].description.includes("780,000"));
-    assert.equal(result.items[0].unitPrice, null);
+    assert.equal(result.items[0].unitPrice, 780000);
+    assert.equal(result.items[0].priceBasis, "catalog-unit");
+    assert.equal(result.items[0].reviewed, false);
     assert.equal(result.items[0].isDemo, false);
   } finally {
     globalThis.fetch = originalFetch;
@@ -295,5 +297,55 @@ test("live response never promotes an unverified total into a comparable unit pr
       if (saved[name] === undefined) delete process.env[name];
       else process.env[name] = saved[name];
     });
+  }
+});
+
+test("공고 품목 상세는 공고번호·차수로 한정하며 계획 단가의 성격을 보존한다", async () => {
+  const saved = process.env.DATA_GO_KR_SERVICE_KEY;
+  const original = globalThis.fetch;
+  process.env.DATA_GO_KR_SERVICE_KEY = "test-key";
+  let called = "";
+  globalThis.fetch = async (input) => {
+    called = String(input);
+    return Response.json({
+      response: {
+        header: { resultCode: "00" },
+        body: {
+          items: [
+            {
+              bidNtceNo: "TEST-001",
+              bidNtceOrd: "000",
+              prdctSno: "1",
+              dtilPrdctClsfcNoNm: "테스트물품",
+              qty: "10",
+              unit: "대",
+              uprc: "100000",
+              prdctSpecNm: "규격",
+            },
+            {
+              bidNtceNo: "OTHER-002",
+              bidNtceOrd: "000",
+              prdctSno: "1",
+              uprc: "1",
+            },
+          ],
+        },
+      },
+    });
+  };
+  try {
+    const result = await getNoticeProducts("TEST-001", "000");
+    assert.equal(result.items.length, 1);
+    assert.equal(result.items[0].unitPrice, 100000);
+    assert.equal(result.items[0].priceBasis, "notice");
+    assert.equal(result.items[0].quantity, 10);
+    assert.equal(new URL(called).searchParams.get("inqryDiv"), "2");
+    assert.equal(new URL(called).searchParams.get("bidNtceOrd"), "000");
+    await assert.rejects(() => getNoticeProducts("../bad", "000"));
+    await assert.rejects(() => getProcurement("테스트", "bid", { page: 8 }));
+  } finally {
+    globalThis.fetch = original;
+    if (saved === undefined) delete process.env.DATA_GO_KR_SERVICE_KEY;
+    else process.env.DATA_GO_KR_SERVICE_KEY = saved;
   }
 });
