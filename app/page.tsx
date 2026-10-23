@@ -271,7 +271,9 @@ export default function App() {
       setAi("");
       setReport("");
       setChecks([]);
-      addLog(`공공 API 조회 ${data.items.length}건 · ${data.queriedAt || ""}`);
+      addLog(
+        `공공 API 조회 ${data.items.length}건 · ${data.queriedAt || ""} · ${data.note || ""}`,
+      );
       setToast(
         data.items.length
           ? "실제 조회자료를 불러왔어요. 누락 조건을 확인하세요."
@@ -1040,6 +1042,12 @@ export default function App() {
                   키 입력은 Vercel → Settings → Environment Variables에서
                   진행합니다. 아래는 설정 유무이며 실제 호출 성공을 뜻하지
                   않습니다.
+                </p>
+                <p className="hint">
+                  공공데이터는 인증키 하나를 등록하면 입찰·낙찰·품목의 공식
+                  조회주소가 자동 적용됩니다. 주소 세 개를 따로 입력할 필요가
+                  없어요. 공공데이터포털에서 세 서비스의 활용승인은 각각
+                  필요합니다.
                 </p>
                 {[
                   ["GPT-OSS · Groq", "GROQ_API_KEY", "groq"],

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { POST } from "../app/api/analyze/route.ts";
 import { GET as procurement } from "../app/api/procurement/route.ts";
 import { GET as status } from "../app/api/status/route.ts";
+import { getProcurement } from "../lib/public-data.ts";
 
 test("API validation, missing keys and protected access return explicit errors", async () => {
   const names = [
@@ -107,6 +108,128 @@ test("API validation, missing keys and protected access return explicit errors",
       if (saved[name] === undefined) delete process.env[name];
       else process.env[name] = saved[name];
     });
+  }
+});
+
+test("official defaults work without URL settings and use service-specific search/date parameters", async () => {
+  const names = [
+    "DATA_GO_KR_SERVICE_KEY",
+    "PROCUREMENT_BID_URL",
+    "PROCUREMENT_AWARD_URL",
+    "PROCUREMENT_SHOPPING_URL",
+  ];
+  const saved = Object.fromEntries(
+    names.map((name) => [name, process.env[name]]),
+  );
+  const originalFetch = globalThis.fetch;
+  names.forEach((name) => delete process.env[name]);
+  process.env.DATA_GO_KR_SERVICE_KEY = "only-test-key";
+  const called: URL[] = [];
+  globalThis.fetch = async (input) => {
+    called.push(new URL(String(input)));
+    return Response.json({
+      response: { header: { resultCode: "00" }, body: { items: [] } },
+    });
+  };
+  try {
+    for (const kind of ["bid", "award", "shopping"] as const) {
+      const result = await getProcurement("공기청정기", kind);
+      assert.deepEqual(result.items, []);
+      assert.ok(!JSON.stringify(result).includes("only-test-key"));
+    }
+    assert.equal(
+      called[0].pathname,
+      "/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch",
+    );
+    assert.equal(
+      called[1].pathname,
+      "/1230000/as/ScsbidInfoService/getScsbidListSttusThngPPSSrch",
+    );
+    assert.equal(
+      called[2].pathname,
+      "/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList",
+    );
+    for (const url of called.slice(0, 2)) {
+      assert.equal(url.searchParams.get("bidNtceNm"), "공기청정기");
+      assert.match(url.searchParams.get("inqryBgnDt")!, /^\d{12}$/);
+      assert.match(url.searchParams.get("inqryEndDt")!, /^\d{12}$/);
+    }
+    assert.equal(called[0].searchParams.get("inqryDiv"), "1");
+    assert.equal(called[1].searchParams.get("inqryDiv"), "2");
+    assert.equal(called[2].searchParams.get("prdctClsfcNoNm"), "공기청정기");
+    assert.equal(called[2].searchParams.get("inqryDiv"), "1");
+    assert.equal(called[2].searchParams.get("regtCncelYn"), "N");
+    assert.match(called[2].searchParams.get("inqryBgnDate")!, /^\d{8}$/);
+    assert.match(called[2].searchParams.get("inqryEndDate")!, /^\d{8}$/);
+    for (const url of called) {
+      assert.equal(url.hostname, "apis.data.go.kr");
+      assert.equal(url.searchParams.get("serviceKey"), "only-test-key");
+      assert.equal(url.searchParams.get("type"), "json");
+      assert.equal(url.searchParams.get("numOfRows"), "30");
+      assert.ok(!url.href.includes("%7B"));
+    }
+    const config = await (await status()).json();
+    assert.equal(config.bid, true);
+    assert.equal(config.award, true);
+    assert.equal(config.shopping, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+    names.forEach((name) => {
+      if (saved[name] === undefined) delete process.env[name];
+      else process.env[name] = saved[name];
+    });
+  }
+});
+
+test("catalog mapping preserves product identity, specification, supplier and unverified price", async () => {
+  const originalFetch = globalThis.fetch;
+  const savedKey = process.env.DATA_GO_KR_SERVICE_KEY;
+  const savedUrl = process.env.PROCUREMENT_SHOPPING_URL;
+  process.env.DATA_GO_KR_SERVICE_KEY = "catalog-test-key";
+  delete process.env.PROCUREMENT_SHOPPING_URL;
+  globalThis.fetch = async () =>
+    Response.json({
+      response: {
+        header: { resultCode: "00" },
+        body: {
+          items: {
+            item: [
+              {
+                shopngCntrctNo: "TEST-CONTRACT",
+                shopngCntrctSno: "1",
+                prdctIdntNo: "TEST-ID",
+                prdctSpecNm: "공기청정기, 규격 A",
+                cntrctCorpNm: "테스트 공급자",
+                cntrctPrceAmt: "780000",
+              },
+              {
+                shopngCntrctNo: "TEST-CONTRACT",
+                shopngCntrctSno: "2",
+                prdctIdntNo: "TEST-ID",
+                prdctSpecNm: "공기청정기, 규격 B",
+                cntrctCorpNm: "테스트 공급자",
+                cntrctPrceAmt: "810000",
+              },
+            ],
+          },
+        },
+      },
+    });
+  try {
+    const result = await getProcurement("공기청정기", "shopping");
+    assert.equal(result.items.length, 2);
+    assert.notEqual(result.items[0].id, result.items[1].id);
+    assert.equal(result.items[0].title, "공기청정기, 규격 A");
+    assert.equal(result.items[0].agency, "테스트 공급자");
+    assert.ok(result.items[0].description.includes("780,000"));
+    assert.equal(result.items[0].unitPrice, null);
+    assert.equal(result.items[0].isDemo, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (savedKey === undefined) delete process.env.DATA_GO_KR_SERVICE_KEY;
+    else process.env.DATA_GO_KR_SERVICE_KEY = savedKey;
+    if (savedUrl === undefined) delete process.env.PROCUREMENT_SHOPPING_URL;
+    else process.env.PROCUREMENT_SHOPPING_URL = savedUrl;
   }
 });
 

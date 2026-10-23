@@ -4,6 +4,16 @@ import type { Evidence } from "./domain.ts";
 export type ProcurementKind = "bid" | "award" | "shopping";
 export type ProcurementItem = Evidence;
 
+// Verified against the official data.go.kr Swagger pages and their reference
+// documents on 2026-10-23. These are public service addresses, not credentials.
+export const DEFAULT_PROCUREMENT_URLS: Record<ProcurementKind, string> = {
+  bid: "https://apis.data.go.kr/1230000/ad/BidPublicInfoService/getBidPblancListInfoThngPPSSrch?inqryDiv=1&bidNtceNm={query}&inqryBgnDt={from}&inqryEndDt={to}",
+  award:
+    "https://apis.data.go.kr/1230000/as/ScsbidInfoService/getScsbidListSttusThngPPSSrch?inqryDiv=2&bidNtceNm={query}&inqryBgnDt={from}&inqryEndDt={to}",
+  shopping:
+    "https://apis.data.go.kr/1230000/at/ShoppingMallPrdctInfoService/getShoppingMallPrdctInfoList?inqryDiv=1&prdctClsfcNoNm={query}&inqryBgnDate={catalogFromDate}&inqryEndDate={toDate}&regtCncelYn=N",
+};
+
 const sources = {
   bid: {
     label: "나라장터 입찰공고정보서비스",
@@ -52,17 +62,22 @@ function normalize(
     "sucsfbidAmt",
     "thtmSucsfbidAmt",
     "prdctUprc",
+    "cntrctPrceAmt",
     "unitPrice",
     "presmptPrce",
     "asignBdgtAmt",
   ).replace(/,/g, "");
   return {
-    id: `${kind}:${scalar(row, "bidNtceNo", "prdctIdntNo", "prdctNo", "cntrctNo") || index}:${scalar(row, "bidNtceOrd")}`,
+    id:
+      kind === "shopping" && scalar(row, "shopngCntrctNo")
+        ? `shopping:${scalar(row, "shopngCntrctNo")}:${scalar(row, "shopngCntrctSno")}:${scalar(row, "prdctIdntNo")}`
+        : `${kind}:${scalar(row, "bidNtceNo", "prdctIdntNo", "prdctNo", "cntrctNo") || index}:${scalar(row, "bidNtceOrd")}:${scalar(row, "bidClsfcNo")}:${scalar(row, "rbidNo")}`,
     title:
       scalar(
         row,
         "bidNtceNm",
         "prdctNm",
+        "prdctSpecNm",
         "prdctClsfcNoNm",
         "dtilPrdctClsfcNoNm",
         "cntrctNm",
@@ -74,10 +89,12 @@ function normalize(
       "dmndInsttNm",
       "cntrctInsttNm",
       "corpNm",
+      "cntrctCorpNm",
     ),
     date: scalar(
       row,
       "bidNtceDt",
+      "fnlSucsfDate",
       "rlOpengDt",
       "opengDt",
       "cntrctDate",
@@ -118,12 +135,9 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
       "공공데이터포털 API 키가 서버에 설정되지 않았습니다. 활용신청 후 일반 인증키를 등록해 주세요.",
       503,
     );
-  const template = process.env[`PROCUREMENT_${kind.toUpperCase()}_URL`];
-  if (!template)
-    throw new ServiceError(
-      `${sources[kind].label}의 승인된 요청주소가 아직 설정되지 않았습니다. 해당 서비스의 활용신청 상세 화면에서 요청주소와 검색 매개변수를 확인해 등록해 주세요.`,
-      503,
-    );
+  const template =
+    process.env[`PROCUREMENT_${kind.toUpperCase()}_URL`]?.trim() ||
+    DEFAULT_PROCUREMENT_URLS[kind];
   if (!template.includes("{query}"))
     throw new ServiceError(
       "공공데이터 요청주소에 검색어 자리표시자 {query}가 필요합니다.",
@@ -131,6 +145,9 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
     );
   const now = new Date(),
     from = new Date(now.getTime() - 30 * 86400000);
+  // Catalog endpoints take dates (8 digits), unlike bid/award timestamps (12).
+  // Restrict to less than 12 calendar months as required by the catalog guide.
+  const catalogFrom = new Date(now.getTime() - 364 * 86400000);
   const stamp = (date: Date, end: boolean) =>
     new Intl.DateTimeFormat("sv-SE", {
       timeZone: "Asia/Seoul",
@@ -145,6 +162,9 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
     url = new URL(
       template
         .replaceAll("{query}", encodeURIComponent(query))
+        .replaceAll("{catalogFromDate}", stamp(catalogFrom, false).slice(0, 8))
+        .replaceAll("{fromDate}", stamp(from, false).slice(0, 8))
+        .replaceAll("{toDate}", stamp(now, true).slice(0, 8))
         .replaceAll("{from}", stamp(from, false))
         .replaceAll("{to}", stamp(now, true)),
     );
@@ -216,6 +236,6 @@ export async function getProcurement(query: string, kind: ProcurementKind) {
       ),
     source: sources[kind],
     queriedAt: new Date().toISOString(),
-    note: "서버에 설정된 조회 범위의 결과입니다. API별 제공 범위가 다르며, 금액은 계약총액·예산·단가가 섞일 수 있어 원자료 확인 전 단가 비교에 사용하지 마세요.",
+    note: `${kind === "shopping" ? "최근 364일에 등록된 현재 등재 품목" : kind === "award" ? "최근 30일 개찰일 기준" : "최근 30일 공고게시일 기준"} 최대 30건의 기본 조회 결과입니다. 전체 검색을 뜻하지 않습니다. 금액은 원자료 확인 전 단가 비교에 사용하지 마세요.`,
   };
 }
